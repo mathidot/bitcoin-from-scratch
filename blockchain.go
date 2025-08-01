@@ -1,38 +1,52 @@
 package main
 
 import (
-	"crypto/sha256"
-	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
-	"time"
 )
 
-type Block struct {
-	nonce        int
-	previousHash [32]byte
-	timestamp    int64
-	transactions []*Transaction
-}
-
-func (b *Block) MarshalJSON() ([]byte, error) {
-	return json.Marshal(struct {
-		Timestamp    int64          `json:"timestamp"`
-		Nonce        int            `json:"nonce"`
-		PreviousHash [32]byte       `json:"previous_hash"`
-		Transactions []*Transaction `json:"transactions"`
-	}{
-		Timestamp:    b.timestamp,
-		Nonce:        b.nonce,
-		PreviousHash: b.previousHash,
-		Transactions: b.transactions,
-	})
-}
+const (
+	MINING_DIFFICULTY int     = 3
+	MINING_REWARD     float32 = 1.0
+	CHAIN_ADDRESS     string  = "COIN_BASE"
+)
 
 type Blockchain struct {
-	transactionsPool []*Transaction
-	chain            []*Block
+	transactionsPool  []*Transaction
+	chain             []*Block
+	blockchainAddress string
+}
+
+func (bc *Blockchain) CopyTransactionsPool() []*Transaction {
+	transactions := make([]*Transaction, 0, len(bc.transactionsPool))
+	for _, t := range bc.transactionsPool {
+		transactions = append(transactions, t.Clone())
+	}
+	return transactions
+}
+
+func (bc *Blockchain) ValidProof(nonce int, previousHash [32]byte, transactions []*Transaction, difficulty int) bool {
+	zeros := strings.Repeat("0", difficulty)
+	guessBlock := Block{
+		nonce:        nonce,
+		previousHash: previousHash,
+		timestamp:    0,
+		transactions: transactions,
+	}
+	guessHashStr := fmt.Sprintf("%x", guessBlock.Hash())
+	fmt.Println(guessHashStr)
+	return guessHashStr[:difficulty] == zeros
+}
+
+func (bc *Blockchain) ProofOfWork() int {
+	previousHash := bc.LastBlock().previousHash
+	transactions := bc.CopyTransactionsPool()
+	nonce := 0
+	for !bc.ValidProof(nonce, previousHash, transactions, MINING_DIFFICULTY) {
+		nonce += 1
+	}
+	return nonce
 }
 
 func (bc *Blockchain) CreateBlock(nonce int, previousHash [32]byte) *Block {
@@ -43,42 +57,16 @@ func (bc *Blockchain) CreateBlock(nonce int, previousHash [32]byte) *Block {
 	return b
 }
 
-func NewBlockchain() *Blockchain {
+func NewBlockchain(blockchainAddress string) *Blockchain {
 	b := &Block{}
 	bc := new(Blockchain)
+	bc.blockchainAddress = blockchainAddress
 	bc.CreateBlock(0, b.Hash())
 	return bc
 }
 
-func (bc *Blockchain) LastBlock() *Block {
-	return bc.chain[len(bc.chain)-1]
-}
-
-func (b *Block) Hash() [32]byte {
-	m, _ := json.Marshal(b)
-	fmt.Println(string(m))
-	return sha256.Sum256(m)
-}
-
-func NewBlock(nonce int, previousHash [32]byte) *Block {
-	b := new(Block)
-	b.nonce = nonce
-	b.timestamp = time.Now().UnixNano()
-	b.previousHash = previousHash
-	return b
-}
-
 func init() {
 	log.SetPrefix("Blockchain: ")
-}
-
-func (b *Block) Print() {
-	fmt.Printf("timestamp        %d\n", b.timestamp)
-	fmt.Printf("nonce            %d\n", b.nonce)
-	fmt.Printf("previousHash     %x\n", b.previousHash)
-	for _, transaction := range b.transactions {
-		transaction.Print()
-	}
 }
 
 func (bc *Blockchain) Print() {
@@ -89,54 +77,32 @@ func (bc *Blockchain) Print() {
 	fmt.Printf("%s", strings.Repeat("=", 60))
 }
 
-type Transaction struct {
-	senderBlockchainAddress    string
-	recipientBlockchainAddress string
-	value                      float32
-}
-
-func NewTransaction(sender string, receiver string, value float32) *Transaction {
-	return &Transaction{
-		senderBlockchainAddress:    sender,
-		recipientBlockchainAddress: receiver,
-		value:                      value,
-	}
-}
-
-func (t *Transaction) Print() {
-	fmt.Printf("%s\n", strings.Repeat("-", 40))
-	fmt.Printf(" sender_blockchain_address:                    %s\n", t.senderBlockchainAddress)
-	fmt.Printf(" recipient_blockchain_address:                 %s\n", t.recipientBlockchainAddress)
-	fmt.Printf(" value:                                        %.1f\n", t.value)
-}
-
-func (t *Transaction) MarshalJSON() ([]byte, error) {
-	return json.Marshal(struct {
-		Sender    string  `json:"sender"`
-		Recipient string  `json:"recipient"`
-		Value     float32 `json:"value"`
-	}{
-		Sender:    t.senderBlockchainAddress,
-		Recipient: t.recipientBlockchainAddress,
-		Value:     t.value,
-	})
+func (bc *Blockchain) LastBlock() *Block {
+	return bc.chain[len(bc.chain)-1]
 }
 
 func (bc *Blockchain) AddTransaction(sender string, recipient string, value float32) {
 	bc.transactionsPool = append(bc.transactionsPool, NewTransaction(sender, recipient, value))
 }
 
+func (bc *Blockchain) Mining() bool {
+	bc.AddTransaction(CHAIN_ADDRESS, bc.blockchainAddress, MINING_REWARD)
+	none := bc.ProofOfWork()
+	previousHash := bc.LastBlock().previousHash
+	bc.CreateBlock(none, previousHash)
+	return true
+}
+
 func main() {
-	bc := NewBlockchain()
+	bc := NewBlockchain("cuidongliang")
 	bc.Print()
 
 	bc.AddTransaction("A", "B", 100.0)
-	previousHash := bc.LastBlock().Hash()
-	bc.CreateBlock(1, previousHash)
+	bc.Mining()
 	bc.Print()
 
 	bc.AddTransaction("B", "C", 200.0)
-	previousHash = bc.LastBlock().Hash()
-	bc.CreateBlock(2, previousHash)
+	bc.AddTransaction("X", "Y", 300.0)
+	bc.Mining()
 	bc.Print()
 }
